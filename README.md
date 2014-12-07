@@ -74,4 +74,3 @@ This script needs the Dropbox Python package and hurry.filesize. A requirements.
  - Better error handling - there's a lot that could go wrong that we don't
    really handle
  - E-mail notifications to admin
- - Logging?
