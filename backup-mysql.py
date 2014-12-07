@@ -20,12 +20,16 @@
 # SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ##
 
-import gzip
 import os
 import re
 import socket
 import sys
 import time
+
+from logentries import LogentriesHandler
+import logging
+import time
+import pyminizip
 
 try:
     from dropbox import client, rest, session
@@ -55,22 +59,27 @@ DROPBOX_ACCESS  = 'dropbox'              # Can be 'app_folder' or 'dropbox'
 DROPBOX_FOLDER  = '/backups/mysql/'      # Folder to use in Dropbox - with trailing slash
 
 # Other Options:
-OPTION_GZIP      = True                  # gzip the resulting SQL file before uploading?
-OPTION_USE_HOST  = True                  # Prepend the system hostname to the output filename?
+OPTION_COMPRESS   = True                  # compress the resulting SQL file before uploading?
+COMPRESS_PASSWORD = 'password'            # password for compressed file
+OPTION_USE_HOST   = True                  # Prepend the system hostname to the output filename?
+OPTION_USE_DATETIME = False                # Use current datetime in the output filename?
+
+LOGENTRIES_TOKEN  = 'logentries-token'
 
 # - - - - - - - - - - END OF CONFIG OPTIONS! - - - - - - - - - - #
 
+CURRENT_PATH = os.path.dirname(os.path.realpath(__file__))
 # Dropbox token file - stores our oauth info for re-use:
-DROPBOX_TOKEN_FILE = 'dropbox.tokens.txt'
+DROPBOX_TOKEN_FILE = CURRENT_PATH + '/dropbox.tokens.txt'
 
 # Directory to work in (include trailing slash)
 # Will be created if it doesn't exist.
-TMP_DIR = os.getcwd() + '/tmp/'
+TMP_DIR = CURRENT_PATH + '/tmp/'
 
 
 def get_timestamp():
     """Returns a MySQL-style timestamp from the current time"""
-    return time.strftime("%Y-%m-%d %T")
+    return time.strftime("%Y-%m-%d %T") if OPTION_USE_DATETIME == True else ''
 
 
 def do_mysql_backup(tmp_file):
@@ -134,6 +143,12 @@ def get_new_dropbox_tokens():
 
 
 def main():
+    # logentries config
+    log = logging.getLogger('logentries')
+    log.setLevel(logging.INFO)
+    handler = LogentriesHandler(LOGENTRIES_TOKEN)
+    log.addHandler(handler)
+
     # Make tmp dir if needed...
     if not os.path.exists(TMP_DIR):
 	    os.makedirs(TMP_DIR)
@@ -141,55 +156,50 @@ def main():
     # Are we prepending hostname to filename?
     hostname = (socket.gethostname() + '-') if(OPTION_USE_HOST == True) else ''
 
-    MYSQL_TMP_FILE  = re.sub('[\\/:\*\?"<>\|\ ]', '-', hostname + 'backup-' + get_timestamp()) + '.sql'
+    MYSQL_TMP_FILE = re.sub('[\\/:\*\?"<>\|\ ]', '-', hostname + 'backup' + get_timestamp()) + '.sql'
 
     # Got final filename, continue on...
-    print "Connecting to Dropbox..."
+    log.info("Connecting to Dropbox...")
     connect_to_dropbox()
 
-    print "Connected to Dropbox as " + dropbox_info['display_name']
+    log.info("Connected to Dropbox as " + dropbox_info['display_name'])
 
-    print "Creating MySQL backup, please wait..."
+    log.info("Creating MySQL backup, please wait...")
     do_mysql_backup(MYSQL_TMP_FILE)
 
-    print "Backup done. File is " + size(os.path.getsize(TMP_DIR + MYSQL_TMP_FILE))
+    log.info("Backup done. File is " + size(os.path.getsize(TMP_DIR + MYSQL_TMP_FILE)))
 
-    if OPTION_GZIP == True:
-        print "GZip enabled - compressing file..."
+    if OPTION_COMPRESS == True:
+        log.info("compressing enabled - compressing file...")
 
-        # Write uncompressed file to gzip file:
+        compression_level = 9 # 1-9
+        srcFile = TMP_DIR + MYSQL_TMP_FILE
+        dstFile = srcFile + '.zip'
+        pyminizip.compress(srcFile, dstFile, COMPRESS_PASSWORD, compression_level)
 
-        # Rant: Is chdir() really the only good way to get rid of dir structure in gz
-        # files? GzipFile sounds like it would work, but....
-        os.chdir(TMP_DIR)
-
-        sql_file = open(TMP_DIR + MYSQL_TMP_FILE, 'rb')
-        gz_file  = gzip.open(MYSQL_TMP_FILE + '.gz', 'wb')
-
-        gz_file.writelines(sql_file)
-
-        sql_file.close()
-        gz_file.close()
-
-        # Delete uncompressed TMP_FILE, set to .gz
-        os.unlink(TMP_DIR + MYSQL_TMP_FILE)
-        MYSQL_TMP_FILE = MYSQL_TMP_FILE + '.gz'
+        # Delete uncompressed TMP_FILE, set to .zip
+        os.unlink(srcFile)
+        MYSQL_TMP_FILE = MYSQL_TMP_FILE + '.zip'
 
         # Tell the user how big the compressed file is:
-        print "File compressed. New filesize: " + size(os.path.getsize(TMP_DIR + MYSQL_TMP_FILE))
+        log.info("File compressed. New filesize: " + size(os.path.getsize(TMP_DIR + MYSQL_TMP_FILE)))
 
 
-    print "Uploading backup to Dropbox..."
+    log.info("Uploading backup to Dropbox...")
     tmp_file = open(TMP_DIR + MYSQL_TMP_FILE)
 
-    result = dropbox_client.put_file(DROPBOX_FOLDER + MYSQL_TMP_FILE, tmp_file)
+    result = dropbox_client.put_file(DROPBOX_FOLDER + MYSQL_TMP_FILE, tmp_file, True)
     # TODO: Check for dropbox.rest.ErrorResponse
 
-    print "File uploaded as '" + result['path'] + "', size: " + result['size']
+    log.info("File uploaded as '" + result['path'] + "', size: " + result['size'])
 
-    print "Cleaning up..."
+    log.info("Cleaning up...")
     os.unlink(TMP_DIR + MYSQL_TMP_FILE)
 
+    log.info("Backup completed")
+
+    # need some time to ensure logentries
+    time.sleep(10)
 
 if __name__ == "__main__":
     main()
