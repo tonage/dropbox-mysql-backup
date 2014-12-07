@@ -22,6 +22,8 @@ https://github.com/wireandbyte/dropbox-mysql-backup.git
       NOTE: In a proper production environment, you probably won't want
       auth details like this to be hardcoded. Re-write to whatever works
       for your environment.
+   
+   3. Set LogEntries token. For more information visit https://logentries.com
 
 
 **B. Set up a Dropbox app!**
@@ -54,13 +56,16 @@ https://github.com/wireandbyte/dropbox-mysql-backup.git
 
 **D. Optional settings**
 
-   1. If you'd like, you can set OPTION_GZIP to True - this will compress
+   1. If you'd like, you can set OPTION_COMPRESS to True - this will compress
       the MySQL file before uploading to Dropbox.
 
    2. If OPTION_USE_HOST is True, then the system hostname will be prepended to the 
       backup file name. Useful if you're backing up multiple systems to the same 
       directory.
 
+   3. COMPRESS_PASSWORD is the password for the backup archive file. Meaningful if OPTION_COMPRESS is set to True. Value '' means no password.
+   
+   4. If OPTION_USE_DATETIME is True, then current timestamp will be append to the backup file name. If set to False, then backup will be created with the same name every time and will replace previous version in dropbox. It's ok, because dropbox has it's own version system.
 
 ## REQUIREMENTS:
 This script needs the Dropbox Python package and hurry.filesize. A requirements.txt is included.
